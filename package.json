@@ -1,0 +1,46 @@
+{
+  "name": "metro-usb",
+  "version": "0.1.0",
+  "description": "Run a React Native / Expo debug build on a cabled iPhone without Wi-Fi: Metro over USB (iOS adb reverse)",
+  "keywords": [
+    "react-native",
+    "expo",
+    "metro",
+    "ios",
+    "usb",
+    "usbmuxd",
+    "adb-reverse",
+    "dev-client",
+    "client-isolation"
+  ],
+  "license": "MIT",
+  "author": "张昊",
+  "homepage": "https://github.com/developerzhanghao/metro-usb#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/developerzhanghao/metro-usb.git"
+  },
+  "bugs": {
+    "url": "https://github.com/developerzhanghao/metro-usb/issues"
+  },
+  "bin": {
+    "metro-usb": "cli/cli.js"
+  },
+  "files": [
+    "cli/*.js",
+    "!cli/*.test.js",
+    "cli/package.json",
+    "ios",
+    "metro-usb.podspec",
+    "react-native.config.js"
+  ],
+  "engines": {
+    "node": ">=18.3"
+  },
+  "scripts": {
+    "test": "node --test \"cli/*.test.js\""
+  },
+  "dependencies": {
+    "plist": "^3.1.0"
+  }
+}
