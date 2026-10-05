@@ -1,5 +1,9 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { CONTROL_PORT } from './frames.js';
@@ -8,7 +12,13 @@ import { connectToDevice, watchDevices } from './usbmux.js';
 
 const HELP = `metro-usb: let a debug app on a cabled iPhone reach dev servers on this Mac, no Wi-Fi needed.
 
-Usage: npx metro-usb [--port <device>[:<host>]]... [--direct]
+Usage: npx metro-usb [--port <device>[:<host>]]... [--verbose] [--no-start] [--direct] [-- <command>...]
+
+Run it in your app's folder. If Metro isn't running yet, it starts it for you (\`expo start\`, or
+\`react-native start\` without Expo) in this terminal; Ctrl+C stops both.
+
+  --no-start          only relay; don't start Metro
+  -- <command>        start this instead, e.g. \`npx metro-usb -- npx expo start --clear\`
 
   --port 8081         forward the phone's localhost:8081 to this Mac's localhost:8081 (default)
   --port 8787         repeat to forward more (e.g. a local API)
@@ -20,10 +30,17 @@ Usage: npx metro-usb [--port <device>[:<host>]]... [--direct]
 
 In the app, open http://localhost:8081.`;
 
+// Everything after "--" is a command to run alongside the relay (usually Metro).
+const separator = process.argv.indexOf('--', 2);
+const ownArgs = separator === -1 ? process.argv.slice(2) : process.argv.slice(2, separator);
+const command = separator === -1 ? [] : process.argv.slice(separator + 1);
+
 const { values } = parseArgs({
+  args: ownArgs,
   options: {
     port: { type: 'string', multiple: true },
     direct: { type: 'boolean', default: false },
+    'no-start': { type: 'boolean', default: false },
     verbose: { type: 'boolean', short: 'v', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -52,8 +69,73 @@ const mapping = [...ports].map(([device, host]) => (device === host ? `${device}
 const log = (message) => console.log(`[metro-usb] ${message}`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function metroIsRunning(port) {
+  return new Promise((resolve) => {
+    const request = http.get({ host: '127.0.0.1', port, path: '/status', timeout: 2000 }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => resolve(body.includes('packager-status:running')));
+    });
+    request.on('error', () => resolve(false));
+    request.on('timeout', () => { request.destroy(); resolve(false); });
+  });
+}
+
+/**
+ * When we start Metro ourselves, the phone is only connected once Metro answers: the phone checks Metro the moment
+ * it connects (to open it automatically) and would otherwise find nothing there yet.
+ */
+async function waitForMetro(port) {
+  log(`waiting for the dev server on localhost:${port}…`);
+  while (!(await metroIsRunning(port))) await sleep(500);
+  log('dev server is up');
+}
+
+function runCommand([program, ...args]) {
+  const child = spawn(program, args, { stdio: 'inherit' });
+  child.on('error', (error) => {
+    console.error(`[metro-usb] couldn't start ${program}: ${error.message}`);
+    process.exit(1);
+  });
+  // Stop together: Ctrl+C reaches both (same terminal), so wait for the command to finish rather than dying first.
+  child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+  process.on('SIGINT', () => {});
+  process.on('SIGTERM', () => child.kill('SIGTERM'));
+}
+
+/** The project's own Metro launcher: Expo if installed, else the React Native CLI. */
+function defaultCommand() {
+  for (const [bin, args] of [['expo', ['start']], ['react-native', ['start']]]) {
+    const file = path.join(process.cwd(), 'node_modules', '.bin', bin);
+    if (fs.existsSync(file)) return [file, ...args];
+  }
+  return null;
+}
+
+async function startMetroIfNeeded() {
+  const metroPort = [...ports.values()][0];
+  if (command.length > 0) {
+    runCommand(command);
+  } else if (values['no-start'] || (await metroIsRunning(metroPort))) {
+    return;
+  } else {
+    const fallback = defaultCommand();
+    if (!fallback) {
+      log(`Metro isn't running and no expo / react-native was found here; start it yourself on port ${metroPort}`);
+      return;
+    }
+    log(`starting Metro: ${path.basename(fallback[0])} ${fallback.slice(1).join(' ')}`);
+    runCommand(fallback);
+  }
+  await waitForMetro(metroPort);
+}
+
+const metroReady = startMetroIfNeeded();
+
 /** Keeps a control connection to one phone alive: retries while the app isn't running, reconnects after it closes. */
 async function serve(name, connect, isAttached) {
+  await metroReady;
   let waiting = false;
   while (isAttached()) {
     let control;
