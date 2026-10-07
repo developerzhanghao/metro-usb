@@ -95,7 +95,6 @@ usbmuxd, the daemon Xcode uses (built into macOS), can only open connections **f
 Known gaps:
 
 - Two `metro-usb` processes attached to the same phone keep replacing each other's connection. Run only one.
-
 - Bare React Native apps don't switch to `localhost` automatically yet. Set it once via *Configure Bundler*.
 - Build configurations not named `Debug` may lack the `DEBUG` flag. Add it to `GCC_PREPROCESSOR_DEFINITIONS` and `SWIFT_ACTIVE_COMPILATION_CONDITIONS`.
 
